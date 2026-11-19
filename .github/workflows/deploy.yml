@@ -1,0 +1,171 @@
+name: Production Deployment - Tenura Portfolio
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================
+  # 1. CI JOB: Test, Lint, Type Check & Build
+  # ==========================================
+  ci:
+    name: Build & Verify (CI)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install Client Dependencies
+        working-directory: ./client
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: ./client
+        run: npm run lint
+
+      - name: Run TypeScript Type Check
+        working-directory: ./client
+        run: npx tsc --noEmit
+
+      - name: Test Next.js Production Build
+        working-directory: ./client
+        run: npm run build
+
+  # ==========================================
+  # 2. CD JOB: Secure Deployment to Hostinger VPS
+  # ==========================================
+  deploy:
+    name: Deploy to Production VPS
+    needs: ci
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      VPS_HOST: "187.127.209.65"
+      VPS_PORT: "22"
+      VPS_USER: "portfolio-deploy"
+      APP_DIR: "/opt/tenura-portfolio"
+      BACKUP_DIR: "/opt/tenura-portfolio-backup"
+      APP_PORT: "3000"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH Key & Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Create Pre-Deployment Backup on VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
+            set -e
+            export PM2_HOME=/home/portfolio-deploy/.pm2
+            if [ -d '${{ env.APP_DIR }}' ]; then
+              echo '📦 Creating local backup of current release...'
+              rm -rf '${{ env.BACKUP_DIR }}'
+              cp -r '${{ env.APP_DIR }}' '${{ env.BACKUP_DIR }}'
+            fi
+          "
+
+      - name: Transfer Project Files via Secure Rsync
+        run: |
+          # Rsync client directory to VPS, preserving VPS-local .env files
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }}" \
+            --exclude '.git*' \
+            --exclude 'node_modules' \
+            --exclude '.next' \
+            --exclude '.env*' \
+            ./client/ ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.APP_DIR }}/
+
+      - name: Build, Reload PM2 & Perform Health Check
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
+            set -e
+            export PM2_HOME=/home/portfolio-deploy/.pm2
+            cd ${{ env.APP_DIR }}
+
+            # Function to trigger rollback if deployment fails
+            rollback() {
+              trap - ERR
+              set +e
+              echo '❌ Deployment step failed! Triggering safe rollback...'
+              if [ -d '${{ env.BACKUP_DIR }}' ]; then
+                echo '⏪ Restoring from backup...'
+                rsync -a --delete --exclude '.env*' '${{ env.BACKUP_DIR }}/' '${{ env.APP_DIR }}/'
+                if pm2 describe tenura-portfolio > /dev/null 2>&1; then
+                  pm2 reload tenura-portfolio --update-env
+                else
+                  pm2 start ecosystem.config.cjs
+                fi
+                rm -rf '${{ env.BACKUP_DIR }}'
+                echo '⏪ Rollback completed.'
+              fi
+              exit 1
+            }
+
+            trap rollback ERR
+
+            echo '📦 Installing clean dependencies with npm ci...'
+            npm ci
+
+            echo '🔍 Running type check and lint on VPS...'
+            npm run lint
+            npx tsc --noEmit
+
+            echo '🔨 Building Next.js production application...'
+            npm run build
+
+            echo '🔄 Reloading tenura-portfolio in PM2...'
+            if pm2 describe tenura-portfolio > /dev/null 2>&1; then
+              pm2 reload tenura-portfolio --update-env
+            else
+              pm2 start ecosystem.config.cjs
+            fi
+            pm2 save
+
+            echo '🩺 Running health check on port ${{ env.APP_PORT }}...'
+            HEALTHY=0
+            for i in {1..15}; do
+              if curl -s -f http://127.0.0.1:${{ env.APP_PORT }} > /dev/null; then
+                echo '✅ Application is healthy on port ${{ env.APP_PORT }}!'
+                HEALTHY=1
+                break
+              fi
+              echo \"⏳ Waiting for app response... (attempt \$i/15)\"
+              sleep 2
+            done
+
+            if [ \$HEALTHY -ne 1 ]; then
+              echo '❌ Health check timed out after 30 seconds!'
+              rollback
+            fi
+
+            # Clean up backup after confirmed healthy deployment
+            rm -rf '${{ env.BACKUP_DIR }}'
+            echo '🎉 Tenura Portfolio deployment completed successfully!'
+          "
