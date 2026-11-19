@@ -64,7 +64,7 @@ jobs:
       VPS_USER: "portfolio-deploy"
       APP_DIR: "/opt/tenura-portfolio"
       BACKUP_DIR: "/home/portfolio-deploy/tenura-portfolio-backup"
-      APP_PORT: "3000"
+      APP_PORT: "3020"
 
     steps:
       - name: Checkout Code
