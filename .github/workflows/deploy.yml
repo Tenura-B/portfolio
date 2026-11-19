@@ -25,10 +25,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 24
+      - name: Setup Node.js 24.22.3
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: "24.22.3"
           cache: "npm"
           cache-dependency-path: client/package-lock.json
 
@@ -70,18 +70,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Configure SSH Key & Known Hosts
+      - name: Configure Known Hosts
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+      - name: Start SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       - name: Create Pre-Deployment Backup on VPS
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
+          ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
             set -e
             export PM2_HOME=/home/portfolio-deploy/.pm2
             if [ -d '${{ env.APP_DIR }}' ]; then
@@ -93,9 +95,9 @@ jobs:
 
       - name: Transfer Project Files via Secure Rsync
         run: |
-          # Rsync client directory to VPS, preserving VPS-local .env files
+          # Rsync client directory to VPS using the active SSH agent
           rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }}" \
+            -e "ssh -p ${{ env.VPS_PORT }}" \
             --exclude '.git*' \
             --exclude 'node_modules' \
             --exclude '.next' \
@@ -104,7 +106,7 @@ jobs:
 
       - name: Build, Reload PM2 & Perform Health Check
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
+          ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
             set -euo pipefail
 
             export NVM_DIR=\"/home/portfolio-deploy/.nvm\"
