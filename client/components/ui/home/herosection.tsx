@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
 import Image from "next/image";
 import Navbar from "@/components/navbar";
 
@@ -45,21 +44,16 @@ const defaultMetaItems: HeroMetaItem[] = [
 export default function HeroSection({
   name = "Tenura Wijesooriya",
   brandName,
-  role = "End-to-End Product Developer",
-  greeting,
   headline = (
     <>
       Product Engineer building impactful digital products and creating
       seamless, scalable web experiences from concept to reality.
     </>
   ),
-  bio,
   showNavbar = true,
   imageSrc = "/images/tenura pic.png",
   imagePosition = "left",
   metaItems = defaultMetaItems,
-  scrollText = "( Scroll for selected project )",
-  scrollTarget = "#projects",
 }: HeroSectionProps) {
   const isImageLeft = imagePosition === "left";
 

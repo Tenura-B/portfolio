@@ -1,8 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 type CursorMode = "dot" | "explore";
+
+function subscribePointer(callback: () => void) {
+  if (typeof window === "undefined") return () => {};
+  const mql = window.matchMedia("(pointer: fine)");
+  mql.addEventListener("change", callback);
+  return () => mql.removeEventListener("change", callback);
+}
+
+function getPointerSnapshot() {
+  return window.matchMedia("(pointer: fine)").matches;
+}
+
+function getServerSnapshot() {
+  return false;
+}
 
 export default function CustomCursor() {
   const cursorRef = useRef<HTMLDivElement>(null);
@@ -13,7 +28,7 @@ export default function CustomCursor() {
   const modeRef = useRef<CursorMode>("dot");
   const [mode, setMode] = useState<CursorMode>("dot");
   const [visible, setVisible] = useState(false);
-  const [isFinePointer, setIsFinePointer] = useState(false);
+  const isFinePointer = useSyncExternalStore(subscribePointer, getPointerSnapshot, getServerSnapshot);
 
   // Active container tracking to detect moving between containers on the same grid
   const activeContainerRef = useRef<string | null>(null);
@@ -25,15 +40,8 @@ export default function CustomCursor() {
   const isStoppedRef = useRef(false);
   const stopTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check if device uses a fine pointer (mouse / trackpad)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setIsFinePointer(window.matchMedia("(pointer: fine)").matches);
-    }
-  }, []);
-
   // Helper to restart the stop timer
-  const restartStopTimer = () => {
+  const restartStopTimer = useCallback(() => {
     if (stopTimerRef.current) {
       clearTimeout(stopTimerRef.current);
     }
@@ -45,10 +53,10 @@ export default function CustomCursor() {
         }
       }, 170);
     }
-  };
+  }, []);
 
   // Inspect the element under the pointer coordinates to determine mode & container
-  const checkCursorTarget = (x: number, y: number) => {
+  const checkCursorTarget = useCallback((x: number, y: number) => {
     if (x < 0 || y < 0) {
       if (modeRef.current !== "dot") {
         modeRef.current = "dot";
@@ -106,10 +114,7 @@ export default function CustomCursor() {
         restartStopTimer();
       }
     }
-  };
-
-  const checkTargetRef = useRef(checkCursorTarget);
-  checkTargetRef.current = checkCursorTarget;
+  }, [restartStopTimer]);
 
   // Animation and follow loop
   useEffect(() => {
@@ -127,7 +132,7 @@ export default function CustomCursor() {
 
       // Check current target every frame so scroll, fast moves, and container exits react instantly
       if (pos.current.x >= 0 && pos.current.y >= 0) {
-        checkTargetRef.current(pos.current.x, pos.current.y);
+        checkCursorTarget(pos.current.x, pos.current.y);
       }
 
       rafId.current = requestAnimationFrame(loop);
@@ -137,7 +142,7 @@ export default function CustomCursor() {
     return () => {
       if (rafId.current) cancelAnimationFrame(rafId.current);
     };
-  }, [isFinePointer]);
+  }, [isFinePointer, checkCursorTarget]);
 
   // Track mouse and scroll interactions
   useEffect(() => {
@@ -200,7 +205,7 @@ export default function CustomCursor() {
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
       if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
     };
-  }, [isFinePointer]);
+  }, [isFinePointer, checkCursorTarget, restartStopTimer]);
 
   if (!isFinePointer) return null;
 

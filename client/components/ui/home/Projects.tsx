@@ -80,7 +80,12 @@ interface ProjectCardProps {
 }
 
 function ProjectCard({ project, index }: ProjectCardProps) {
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(() => {
+    if (typeof window !== "undefined" && !("IntersectionObserver" in window)) {
+      return true;
+    }
+    return false;
+  });
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -88,7 +93,6 @@ function ProjectCard({ project, index }: ProjectCardProps) {
     if (!el) return;
 
     if (!("IntersectionObserver" in window)) {
-      setIsVisible(true);
       return;
     }
 
