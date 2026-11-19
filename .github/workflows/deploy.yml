@@ -63,7 +63,7 @@ jobs:
       VPS_PORT: "22"
       VPS_USER: "portfolio-deploy"
       APP_DIR: "/opt/tenura-portfolio"
-      BACKUP_DIR: "/opt/tenura-portfolio-backup"
+      BACKUP_DIR: "/home/portfolio-deploy/tenura-portfolio-backup"
       APP_PORT: "3000"
 
     steps:
