@@ -105,9 +105,20 @@ jobs:
       - name: Build, Reload PM2 & Perform Health Check
         run: |
           ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
-            set -e
+            set -euo pipefail
+
+            export NVM_DIR=\"/home/portfolio-deploy/.nvm\"
+
+            if [ ! -s \"\$NVM_DIR/nvm.sh\" ]; then
+              echo \"NVM is not installed for portfolio-deploy\"
+              exit 1
+            fi
+
+            source \"\$NVM_DIR/nvm.sh\"
+            nvm use 24.22.3
+
             export PM2_HOME=/home/portfolio-deploy/.pm2
-            cd ${{ env.APP_DIR }}
+            cd /opt/tenura-portfolio
 
             # Function to trigger rollback if deployment fails
             rollback() {
